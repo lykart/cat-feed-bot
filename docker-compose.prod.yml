@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    hostname: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cat_feed
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ./db-data:/var/lib/postgresql/data
+  cat-feed-bot:
+    image: lykart/cat-feed-bot:latest
+    container_name: cat-feed-bot
+    hostname: cat-feed-bot
+    environment:
+      BOT_TOKEN: <BOT_TOKEN>
+      ALLOWED_USERS: <user_id_1>,<user_id_2>
+      DATABASE_URL: postgres://postgres:password@postgres:5432/cat_feed
+      TIMEZONE: Asia/Yekaterinburg
