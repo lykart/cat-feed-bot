@@ -118,7 +118,7 @@ func main() {
 					bot.Send(msg)
 					log.Printf("Ошибка получения данных: %v", err)
 				} else {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Всего добавлено корма: %d.", total))
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("Всего добавлено корма: %dг.", total))
 					bot.Send(msg)
 				}
 
@@ -129,8 +129,13 @@ func main() {
 					bot.Send(msg)
 					log.Printf("Ошибка получения данных за сегодня: %v", err)
 				} else {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("За сегодня добавлено корма: %d.", totalToday))
-					bot.Send(msg)
+					if totalToday == 0 {
+						msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Сегодня записей нет.")
+						bot.Send(msg)
+					} else {
+						msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("За сегодня добавлено корма: %dг.", totalToday))
+						bot.Send(msg)
+					}
 				}
 
 
@@ -145,10 +150,7 @@ func main() {
 						msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Сегодня записей нет.")
 						bot.Send(msg)
 					} else {
-						response := "Записи за сегодня:\n"
-						for _, record := range records {
-							response += fmt.Sprintf("ID: %d, Корм: %d, Время: %s\n", record.ID, record.Amount, record.CreatedAt.Format("15:04"))
-						}
+						response := "Записи за сегодня:\n" + strings.Join(records, "\n")
 						msg := tgbotapi.NewMessage(update.Message.Chat.ID, response)
 						bot.Send(msg)
 					}
@@ -199,10 +201,15 @@ func main() {
 					bot.Send(msg)
 					log.Printf("Ошибка получения данных за сегодня: %v", err)
 				} else {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("За сегодня добавлено корма: %d.", totalToday))
-					bot.Send(msg)
+					if totalToday == 0 {
+						msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Сегодня записей нет.")
+						bot.Send(msg)
+					} else {
+						msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("За сегодня добавлено корма: %dг.", totalToday))
+						bot.Send(msg)
+					}
 				}
-				} else {
+			} else {
 					amount, err := strconv.Atoi(text)
 					if err != nil || amount < 1 || amount > 20 {
 						msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Пожалуйста, выбери число от 1 до 20 или используй кнопку для просмотра общей статистики.")
@@ -269,7 +276,7 @@ func getTotalFood(db *gorm.DB) (int, error) {
 
 // Получение количества корма за сегодня
 func getTotalFoodToday(db *gorm.DB) (int, error) {
-	// Получаем часовой пояс
+	// Получаем часовой пояс из окружения
 	timeZone := os.Getenv("TIMEZONE")
 	if timeZone == "" {
 		timeZone = "UTC" // По умолчанию UTC
@@ -280,17 +287,21 @@ func getTotalFoodToday(db *gorm.DB) (int, error) {
 		return 0, fmt.Errorf("ошибка загрузки часового пояса: %v", err)
 	}
 
-	// Начало текущего дня в заданном часовом поясе
+	// Вычисляем начало текущего дня в заданном часовом поясе
 	now := time.Now().In(loc)
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 
+	// Подсчёт общего количества
 	var total int64
-	err = db.Model(&CatFood{}).Where("created_at >= ?", startOfDay).Select("SUM(amount)").Scan(&total).Error
-	return int(total), err
+	err = db.Model(&CatFood{}).Where("created_at >= ?", startOfDay).Select("COALESCE(SUM(amount), 0)").Scan(&total).Error
+	if err != nil {
+	    return 0, fmt.Errorf("ошибка получения данных: %v", err)
+	}
+	return int(total), nil
 }
 
-// Получение записей за сегодня
-func getTodayRecords(db *gorm.DB, userID int64) ([]CatFood, error) {
+// Получение всех записей за сегодня
+func getTodayRecords(db *gorm.DB, currentUserID int64) ([]string, error) {
 	var records []CatFood
 
 	// Получаем часовой пояс из окружения
@@ -309,12 +320,25 @@ func getTodayRecords(db *gorm.DB, userID int64) ([]CatFood, error) {
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 
 	// Запрос к базе данных
-	err = db.Where("user_id = ? AND created_at >= ?", userID, startOfDay).Find(&records).Error
+	err = db.Where("created_at >= ?", startOfDay).Order("created_at").Find(&records).Error
 	if err != nil {
 		return nil, fmt.Errorf("ошибка получения данных: %v", err)
 	}
 
-	return records, nil
+	// Форматируем записи с пометкой авторства
+	var formattedRecords []string
+	for _, record := range records {
+		authorMark := ""
+		if record.UserID == currentUserID {
+			authorMark = " (Вы)"
+		}
+		formattedRecords = append(formattedRecords, fmt.Sprintf(
+			"ID: %d, Корм: %d, Время: %s%s",
+			record.ID, record.Amount, record.CreatedAt.In(loc).Format("15:04"), authorMark,
+		))
+	}
+
+	return formattedRecords, nil
 }
 
 // Парсинг разрешенных пользователей из строки окружения
